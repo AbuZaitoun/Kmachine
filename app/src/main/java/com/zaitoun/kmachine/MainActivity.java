@@ -13,6 +13,7 @@ import com.google.android.things.pio.Gpio;
 import com.google.android.things.pio.GpioCallback;
 import com.google.android.things.pio.PeripheralManager;
 import com.google.android.things.pio.Pwm;
+import com.zaitoun.kmachine.Controllers.Servo;
 
 import java.io.IOException;
 import java.text.DecimalFormat;
@@ -41,7 +42,7 @@ public class MainActivity extends AppCompatActivity {
     private Handler mCallbackHandler;
     private Handler ultrasonicTriggerHandler;
 
-    private Pwm mPwm;
+    private Servo servo;
     int i;
     Timer t;
 
@@ -50,10 +51,12 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Basically tied java object to xml object, android things
         toggle_heat = findViewById(R.id.heat_toggle);
         toggle_pump = findViewById(R.id.pump_toggle);
         distance = findViewById(R.id.distance);
 
+        // The next couple of lines are used for ultrasound sensor, yet I'm not sure if it's the best way to do it, gotta search more
         // Prepare handler for GPIO callback
         HandlerThread handlerThread = new HandlerThread("callbackHandlerThread");
         handlerThread.start();
@@ -67,8 +70,8 @@ public class MainActivity extends AppCompatActivity {
 
         try {
             PeripheralManager manager = PeripheralManager.getInstance();
-            mPwm = manager.openPwm(PWM_PIN);
-            mPwm.setPwmFrequencyHz(50);
+            servo = new Servo(PWM_PIN, 50);
+
             gpio_heat = manager.openGpio(GPIO_HEAT);
             gpio_pump = manager.openGpio(GPIO_PUMP);
             gpio_echo = manager.openGpio(GPIO_ECHO);
@@ -81,9 +84,10 @@ public class MainActivity extends AppCompatActivity {
 
         ultrasonicTriggerHandler.post(triggerRunnable);
 
-        toggle_heat.setOnClickListener(v->toggleHeat());
-        toggle_pump.setOnClickListener(b->togglePump());
+        toggle_heat.setOnClickListener(v->toggleIO(gpio_heat));
+        toggle_pump.setOnClickListener(b->toggleIO(gpio_pump));
 
+        // The next three lines are not useful for our app, they're just added to test the servo, will be replaced with something useful later
         i = 0;
         t = new Timer();
         t.scheduleAtFixedRate(new TimerTask() {
@@ -97,50 +101,63 @@ public class MainActivity extends AppCompatActivity {
     private void NextMove() {
         switch (i % 2) {
             case 0:
-                Swing0Degree();
+                try {
+                    servo.move0Degrees();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
                 break;
             case 1:
-                Swing180Degree();
+                try {
+                    servo.move180Degrees();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
                 break;
         }
         i++;
     }
+
+    /**
+     * Function used to initialize IO pins
+     * Don't forget to add whatever pin you add here
+     * @throws IOException when wrong IO pin is given, shouldn't happen if we stick to the map
+     */
     public void configureInput() throws IOException {
 
-        // Initialize the pin as a high output
+        // Initialize directions for IO pins
         gpio_heat.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
         gpio_pump.setDirection(Gpio.DIRECTION_OUT_INITIALLY_HIGH);
-        // Initialize the pins for ultrasound sensor
         gpio_trigger.setDirection(Gpio.DIRECTION_OUT_INITIALLY_LOW);
         gpio_echo.setDirection(Gpio.DIRECTION_IN);
+
+        // When waiting signal from input port, use callback
         gpio_echo.setEdgeTriggerType(Gpio.EDGE_BOTH);
-        gpio_echo.setActiveType(Gpio.ACTIVE_HIGH);
         gpio_echo.registerGpioCallback(mCallbackHandler, mCallback);
-        // Low voltage is considered active
+
+        // Set Active type for IO pins
+        gpio_echo.setActiveType(Gpio.ACTIVE_HIGH);
         gpio_heat.setActiveType(Gpio.ACTIVE_LOW);
         gpio_pump.setActiveType(Gpio.ACTIVE_LOW);
 
-        // Toggle the value to be LOW
+        // Set initial value for output IO pins
         gpio_heat.setValue(heat_state);
         gpio_pump.setValue(pump_state);
     }
-    private void toggleHeat(){
+
+    /**
+     * This function toggles the IO pin, useful for turning on and off pump and heat
+     * @param gpio gpio is the general purpose IO you want to toggle
+     */
+    private void toggleIO(Gpio gpio){
         try {
-            gpio_heat.setValue(heat_state);
-            heat_state = !heat_state;
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-    private void togglePump(){
-        try {
-            gpio_pump.setValue(pump_state);
-            pump_state = !pump_state;
+            gpio.setValue(!gpio.getValue());
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
+    //TODO: Figure out how to get accurate reading from ultrasound sensor
     private Runnable triggerRunnable = new Runnable() {
         @Override
         public void run() {
@@ -169,8 +186,6 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-
-    // Step 5. Register an event callback.
     private GpioCallback mCallback = new GpioCallback() {
         @Override
         public boolean onGpioEdge(Gpio gpio) {
@@ -204,22 +219,6 @@ public class MainActivity extends AppCompatActivity {
             Log.e("TAG", "error: " + error);
         }
     };
-
-    private void Swing180Degree() {
-        try {
-            mPwm.setPwmDutyCycle(12.5);
-        } catch (Exception ex) {
-
-        }
-    }
-    private void Swing0Degree() {
-        try {
-            mPwm.setPwmDutyCycle(2.5);
-            mPwm.setEnabled(true);
-        } catch (Exception ex) {
-
-        }
-    }
 
     @Override
     protected void onDestroy() {
